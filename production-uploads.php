@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Production Uploads
- * Description: Replaces local upload URLs for development. Works on front-end, Gutenberg, and in Patterns.
- * Version: 1.9
+ * Description: Replaces local upload URLs for development. Works on front-end, Gutenberg, Patterns, and WooCommerce pages.
+ * Version: 2.3
  * Author: Jan Pěnčík
  */
 
@@ -60,6 +60,15 @@ class Local_Prod_Upload_Replacer {
 
         // --- Frontend Catch-all ---
         add_filter('the_content', [$this, 'filter_frontend_content'], 999);
+        
+        // --- HTML Output Filter for srcset attributes (fixes WooCommerce archive pages) ---
+        add_filter('wp_get_attachment_image_attributes', [$this, 'filter_image_attributes'], 10, 3);
+        add_filter('woocommerce_product_get_image', [$this, 'filter_woocommerce_image_html'], 10, 5);
+        add_filter('woocommerce_single_product_image_thumbnail_html', [$this, 'filter_woocommerce_gallery_thumbnail'], 10, 4);
+        add_filter('woocommerce_product_thumbnails', [$this, 'filter_woocommerce_gallery_html'], 10);
+        add_filter('the_content', [$this, 'filter_final_content'], 9999);
+        add_filter('the_excerpt', [$this, 'filter_final_content'], 9999);
+        add_filter('woocommerce_short_description', [$this, 'filter_final_content'], 9999);
     }
 
     /**
@@ -234,6 +243,160 @@ class Local_Prod_Upload_Replacer {
             return $content;
         }
         return str_replace($this->local_base_url, $this->production_base_url, $content);
+    }
+
+    /**
+     * [NEW] Filters image attributes including srcset for WooCommerce and other themes.
+     */
+    public function filter_image_attributes($attr, $attachment, $size) {
+        if (isset($attr['srcset'])) {
+            $attr['srcset'] = $this->replace_url($attr['srcset']);
+        }
+        if (isset($attr['src'])) {
+            $attr['src'] = $this->replace_url($attr['src']);
+        }
+        return $attr;
+    }
+
+    /**
+     * [NEW] Filters WooCommerce product image HTML to fix srcset attributes.
+     */
+    public function filter_woocommerce_image_html($image, $product, $image_id, $size, $props) {
+        if (is_admin()) {
+            return $image;
+        }
+        
+        // Early return if no local URL is found in content
+        if (strpos($image, $this->local_base_url) === false) {
+            return $image;
+        }
+        
+        // Replace srcset attributes in the image HTML
+        $image = preg_replace_callback(
+            '/srcset=["\']([^"\']+)["\']/',
+            function($matches) {
+                $srcset = $matches[1];
+                $srcset = str_replace($this->local_base_url, $this->production_base_url, $srcset);
+                return 'srcset="' . $srcset . '"';
+            },
+            $image
+        );
+        
+        // Also handle src attributes just in case
+        $image = str_replace($this->local_base_url, $this->production_base_url, $image);
+        
+        return $image;
+    }
+
+    /**
+     * [NEW] Filters WooCommerce gallery thumbnail HTML.
+     */
+    public function filter_woocommerce_gallery_thumbnail($image, $attachment_id) {
+        if (is_admin()) {
+            return $image;
+        }
+        
+        // Early return if no local URL is found in content
+        if (strpos($image, $this->local_base_url) === false) {
+            return $image;
+        }
+        
+        // Replace srcset attributes in the thumbnail HTML
+        $image = preg_replace_callback(
+            '/srcset=["\']([^"\']+)["\']/',
+            function($matches) {
+                $srcset = $matches[1];
+                $srcset = str_replace($this->local_base_url, $this->production_base_url, $srcset);
+                return 'srcset="' . $srcset . '"';
+            },
+            $image
+        );
+        
+        // Also handle src attributes
+        $image = str_replace($this->local_base_url, $this->production_base_url, $image);
+        
+        return $image;
+    }
+
+    /**
+     * [NEW] Filters WooCommerce product gallery HTML.
+     */
+    public function filter_woocommerce_gallery_html($gallery_html) {
+        if (is_admin()) {
+            return $gallery_html;
+        }
+        
+        // Early return if no local URL is found in content
+        if (strpos($gallery_html, $this->local_base_url) === false) {
+            return $gallery_html;
+        }
+        
+        // Replace srcset attributes in the gallery HTML
+        $gallery_html = preg_replace_callback(
+            '/srcset=["\']([^"\']+)["\']/',
+            function($matches) {
+                $srcset = $matches[1];
+                $srcset = str_replace($this->local_base_url, $this->production_base_url, $srcset);
+                return 'srcset="' . $srcset . '"';
+            },
+            $gallery_html
+        );
+        
+        // Also handle data-srcset attributes
+        $gallery_html = preg_replace_callback(
+            '/data-srcset=["\']([^"\']+)["\']/',
+            function($matches) {
+                $srcset = $matches[1];
+                $srcset = str_replace($this->local_base_url, $this->production_base_url, $srcset);
+                return 'data-srcset="' . $srcset . '"';
+            },
+            $gallery_html
+        );
+        
+        // Also handle src attributes
+        $gallery_html = str_replace($this->local_base_url, $this->production_base_url, $gallery_html);
+        
+        return $gallery_html;
+    }
+
+    
+
+    /**
+     * [NEW] Final content filter to catch any remaining srcset attributes.
+     */
+    public function filter_final_content($content) {
+        if (is_admin()) {
+            return $content;
+        }
+        
+        // Early return if no local URL is found in content
+        if (strpos($content, $this->local_base_url) === false) {
+            return $content;
+        }
+        
+        // Use regex to find and replace srcset attributes in HTML
+        $content = preg_replace_callback(
+            '/srcset=["\']([^"\']+)["\']/',
+            function($matches) {
+                $srcset = $matches[1];
+                $srcset = str_replace($this->local_base_url, $this->production_base_url, $srcset);
+                return 'srcset="' . $srcset . '"';
+            },
+            $content
+        );
+        
+        // Also handle data-srcset attributes that some themes use
+        $content = preg_replace_callback(
+            '/data-srcset=["\']([^"\']+)["\']/',
+            function($matches) {
+                $srcset = $matches[1];
+                $srcset = str_replace($this->local_base_url, $this->production_base_url, $srcset);
+                return 'data-srcset="' . $srcset . '"';
+            },
+            $content
+        );
+        
+        return $content;
     }
 }
 
